@@ -1,0 +1,14 @@
+# Fallback when the target repository has no root .workmux.yaml.
+agent: codex
+merge_strategy: merge
+panes:
+  - command: <agent>
+    focus: true
+  - split: horizontal
+# Do not inherit global dependency symlinks or automatic service startup.
+files:
+  copy: []
+  symlink: []
+post_create: []
+pre_merge: []
+pre_remove: []

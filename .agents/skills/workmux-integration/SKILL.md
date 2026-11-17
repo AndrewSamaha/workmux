@@ -1,20 +1,53 @@
 ---
 name: workmux-integration
-description: Manage this project's feature integration branch and delegated workmux task agents through review, local merging, and validation. Use for integration-agent assignments or requests to implement a task in another worktree.
+description: Coordinate a feature integration branch and separate workmux task agents across GitHub repositories, including review, local merging, completion monitoring, and combined validation. Use for workmux integration assignments or delegated task briefs.
 ---
 
 # Workmux integration
 
-Read `docs/workmux-workflow.v5.md` from the current repository root before acting. It is the source of truth for dispatch, integration, handoff state, branch ownership, recovery, and delivery. Resolve repository paths from this worktree, not from a hard-coded original checkout.
+Locate the central workflow root from the kickoff, task brief, or existing
+integration handoff. For a manually invoked copied skill, read
+`git config --global --path workmux.workflowRoot`. If neither supplies an
+existing directory, request its location; do not look for workflow files in the
+target repo or assume the installed skill is still inside the workflow checkout.
+Read `<workflow-root>/AGENTS.md` and `<workflow-root>/workflow.md`, the source of
+truth for roles, dispatch, reports, monitoring, recovery, and delivery. Also
+follow the target repository's applicable agent instructions.
 
-Inspect the current branch and working state. Identify the intended integration worktree, feature branch, goal, and acceptance criteria from the request and existing context. Read `.workmux-local/integration.md` if present, verify it against Git and live workmux status, and resume existing related tasks rather than launching duplicates. Prepare a synchronized-main starting point only when creating a new integration assignment; do not recreate or reset an existing integration branch.
+Identify your role before acting. As a TASK AGENT, implement the supplied brief
+directly in its worktree, run appropriate isolated checks, commit, atomically
+write the specified completion report, and notify the exact integration target.
+Leave dispatch, merging, shared-service checks, and publication to integration.
 
-Local `main` is reserved for syncing with GitHub. Never merge task or integration branches into local `main`; task branches merge into the integration branch, and the integration branch reaches `main` only through its PR. Delegate feature implementation and corrections to separate workmux task agents; own review, merging, integration validation, and workflow maintenance. When delegating, use separate workmux worktrees and task sessions, explicit `--base` targets, self-contained prompt files, and a committed relevant starting point. Do not commit unrelated user changes. Tell task agents to implement directly, run local checks, commit their work, and leave merging and shared-service testing to you.
+As an INTEGRATION AGENT, verify the intended worktree, branch, goal, and acceptance
+criteria. Read `.workmux-local/integration.md` if present and reconcile it against
+Git and live workmux status. Resume existing related tasks rather than launching
+duplicates. For a new integration, use the central launcher, which discovers the
+GitHub default with `default-branch.sh` and branches from its fetched commit.
+Do not recreate an existing integration or switch/reset its branch.
 
-Track dispatched handles through completion, including across interruptions. Verify launches, inspect status and captured output, review committed diffs and check results, and reuse related sessions for corrections. Merge accepted work one task at a time with explicit `--into <integration-branch> --keep`. Run combined validation in the integration worktree before removing retained task worktrees. Keep the app/server and shared-service checks in that integration worktree.
+Never merge into a local default branch. Delegate implementation and corrections
+to separate workmux task worktrees from the committed integration branch. Supply
+absolute central instruction paths, the TASK AGENT role, target repository,
+recorded default branch, effective config path, exact integration notification
+target, and task-local report path in every brief. Use explicit `--base` and
+`--config` on task creation and `--into <integration-branch> --keep` on merging.
+Do not commit unrelated user edits.
 
-Maintain `.workmux-local/integration.md` in the integration worktree after meaningful state changes, following the document's handoff fields. Keep prompts under `.workmux-local/prompts/`. These ignored files stay local; do not commit them or replicate the handoff into task worktrees.
+Track tasks across interruptions. Verify launches, monitor with bounded waits
+and status/capture checks, and verify reports against committed diffs and check
+results. Record acknowledgment by task handle and commit SHA. Continue through
+review, corrections, merge, combined validation, and cleanup within the existing
+authorization. Follow the workflow's completion protocol for delivery failures,
+duplicate messages, and blocked tasks. A done status is not acceptance.
 
-Follow the user's publishing authorization; dispatch and local integration do not alone authorize pushing or opening a PR. After GitHub merges the PR, sync local `main` with `git pull --ff-only`. If local `main` is ahead/diverged or fast-forward fails, stop and follow v5 recovery; never merge or reset blindly. Report the integrated result, validation evidence, and any remaining work.
+Keep the integration handoff and prompts under ignored `.workmux-local/` in the
+integration worktree; task agents write their own completion reports. Record the
+workflow root, repository identity, default branch, integration branch, base SHA,
+effective config, and notification context so a new agent can resume. Coordinate
+shared services and choose setup/check commands from the target repo's guidance.
 
-Require task-local durable completion reports and explicit READY_FOR_REVIEW or TASK_BLOCKED messages to the integration target supplied in each brief. Monitor outstanding tasks with bounded waits and status/capture checks, including after interruptions. Record acknowledgment by task handle and commit SHA; verify reports against Git and continue through review, merge, validation, and cleanup without waiting for another user prompt. Follow the v4 protocol for failed delivery and duplicate notifications.
+Push or open a PR only when requested, targeting the recorded and verified GitHub
+default branch in the correct repository. Synchronize local default branches only
+by fast-forward in a suitable worktree. Stop on ahead/diverged commits and follow
+central recovery guidance; never reset or merge blindly.

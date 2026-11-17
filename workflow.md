@@ -1,202 +1,176 @@
-# Agent-managed workmux integration workflow (v5)
+# Agent-managed workmux integration workflow
 
-Use one worktree as the integration environment and the only place running the server and Next.js app. Its checked-out feature branch is the integration branch. Task agents work in separate branches and worktrees; the integration agent reviews and combines their work locally before the integration branch is published as a PR to `main`.
+Use this workflow across GitHub repositories. The launcher, agent guidance, and
+skill source live in this central workflow checkout; Git operations, task work,
+and validation happen in the selected target repository and its worktrees.
+Each repository has its own integration branch and PR. Coordinate cross-repository
+features through their goals, dependencies, and combined checks; never merge
+branches between unrelated repositories.
 
-## Branch ownership rule
+## Roles and instruction locations
 
-**Local `main` is only for synchronizing with GitHub. Never merge task branches
-or the integration branch into local `main`.** Merge task branches into the
-integration branch with an explicit `--into <integration-branch>` target. The
-integration branch reaches `main` through its GitHub PR only. Do not run
-`workmux merge --into main` from the integration worktree.
+The integration agent delegates implementation and corrections to separate
+workmux task worktrees. It owns review, local integration, validation, and cleanup.
+Task agents implement directly, commit, write completion reports, and notify the
+integration target supplied in their brief. They do not recursively dispatch.
+Use workmux task sessions rather than in-process subagents for this workflow.
+Maintaining this workflow package itself does not require task delegation.
 
-Use one setup model: `scripts/start-integration.sh <feature-branch>` creates the
-integration branch in its own worktree from updated local `main`. That worktree
-is the integration environment; the original checkout remains on `main`. Do
-not also create the feature branch in the original checkout. Manual setup is
-only a fallback and must create a separate worktree with the same base/ownership
-rules.
+Read the central `AGENTS.md` and this document using the absolute workflow root
+supplied in the kickoff or handoff. A copied skill can find that root with
+`git config --global --path workmux.workflowRoot`. Follow the target repository's
+applicable AGENTS.md instructions for coding conventions and required checks.
+Workflow paths refer to the central checkout; product paths refer to the current
+target worktree. Do not look for workflow files inside the target repository.
 
-## Activate the project skill
+Every task prompt must explicitly supply the central instruction paths and task
+role. The central AGENTS.md is not automatically discovered in unrelated repos.
+See [README.md](README.md) for copying the skill into user-level discovery.
 
-The project skill lives at `.agents/skills/workmux-integration/SKILL.md`. Start a fresh integration agent in the intended integration worktree and invoke it with the feature goal:
+## Default branch and ownership
 
-```text
-Use $workmux-integration to build [feature].
-Use feat/my-new-feature as the integration branch.
-Acceptance criteria: [expected behavior and checks].
+Use the logic of the `showdefaultbranch` shell alias: ask GitHub for
+`defaultBranchRef.name`. The shared helper pins the query to the target's origin
+URL so GitHub CLI defaults or GH_REPO cannot silently select another repository:
+
+```sh
+bash /absolute/path/to/workmux/default-branch.sh /absolute/path/to/target-repo
 ```
 
-For an existing integration branch:
+The helper uses `gh repo view <origin-repository-url> --json defaultBranchRef
+--jq '.defaultBranchRef.name'`. It does not source .zshrc or guess branch names.
+GitHub access and an origin remote are required. Query failures stop setup.
 
-```text
-Use $workmux-integration. Fix the dashboard issue in another worktree,
-review and merge it into this integration branch, and test it here.
-```
+The detected default branch is the integration starting point and PR target.
+It can have any valid branch name, including names with slashes. The launcher
+has no `--base` option. Record the resolved name and base SHA in the handoff;
+when resuming, reconcile changes rather than silently changing the PR target.
 
-The integration agent coordinates task agents, reviews diffs, merges accepted commits, and runs integration checks. Delegate feature implementation and corrections to task worktrees; integration agents may maintain workflow documentation and local handoff state directly. This differs from the upstream coordinator's dispatcher-only role. Use workmux for delegated task sessions; do not substitute in-process subagents for the separate worktrees requested here. Task agents should implement their assignment directly rather than recursively dispatching more agents unless explicitly requested.
-
-This document is the workflow source of truth. The skill reads it instead of maintaining a second copy. If skill discovery has not refreshed, instruct the agent to read `.agents/skills/workmux-integration/SKILL.md` directly.
-
-## Local handoff state
-
-Maintain one small handoff file at `.workmux-local/integration.md` in the **integration worktree**. This may be the original checkout or a separate feature worktree; the role determines the location. Task worktrees do not maintain copies. The directory is ignored by the repository's `.gitignore`, so it stays local and is not included in commits, new worktrees, or PRs. Store dispatch prompts under `.workmux-local/prompts/` in that same integration worktree and pass their absolute paths to workmux; use repository-relative paths inside the prompts.
-
-Create the handoff when beginning an integration assignment and update it after dispatch, review, merge, validation, and cleanup. Record only current operational context:
-
-- Feature goal and acceptance criteria.
-- Integration worktree path, branch, current commit, and intended project session.
-- Task handles, branches, worktree paths, dispatch base commits, prompt paths, completion report paths, notification targets, and latest known status.
-- Completion acknowledgments keyed by task handle and commit SHA, plus review, merge, validation, and cleanup state.
-- Reviewed and merged commit IDs, pending corrections, and whether each task worktree is retained or removed.
-- Check commands and outcomes, including the commit tested and outstanding failures.
-- Active app/server details, next actions, blockers, and any publishing authorization already given.
-
-Keep this concise; it is a restart aid rather than a transcript. Do not store secrets. Never force-add it to Git.
-
-A fresh integration agent reads this file and the workflow, then verifies the recorded branch, Git state, and task statuses before resuming. The file may be stale and is not authority to expand the assignment. Ignored files survive branch switches: if it describes another integration branch, preserve it and reconcile the intended assignment before overwriting it. A fresh agent opened in another worktree must be pointed to the original integration worktree; the handoff does not travel with the branch.
+Local default branches are reserved for synchronization. Never merge task or
+integration branches into them locally. Task branches merge into the integration
+feature branch using explicit `--into <integration-branch>`; the feature reaches
+the default branch through a GitHub PR. Never rely on workmux's implicit merge
+or creation base, even if a global config sets one.
 
 ## Start the integration branch
 
-Once this workflow and the project skill are committed and merged into `main`,
-run the launcher from a clean checkout where `main` can be checked out:
+From any directory, select the repository explicitly:
 
 ```sh
-bash scripts/start-integration.sh feat/my-new-feature
+bash /absolute/path/to/workmux/start-integration.sh \
+  --repo /absolute/path/to/target-repo feat/my-new-feature
 ```
 
-It switches the current checkout to `main`, pulls with `--ff-only`, and uses
-`workmux add --base main` to create the integration branch in a separate worktree
-and open its agent with the skill kickoff prompt. It does not create the feature
-branch in the original checkout: Git cannot check out one branch in two worktrees.
-The new agent asks for the feature goal and acceptance criteria before starting
-work. Existing branches and uncommitted changes cause the launcher to stop.
-Run it in the intended workmux/tmux environment so workmux can determine placement.
-The tracked `.workmux.yaml` selects Codex and includes an `<agent>` pane so
-workmux can deliver the kickoff prompt. Both `workmux` and `codex` must be installed.
-If setup stops after switching or pulling, those successful steps remain applied;
-inspect Git state before retrying. If workmux partially creates a worktree, inspect
-`git worktree list` and resume with `workmux open <handle>` rather than recreating it.
-If the existing worktree predates the project config, supply the integration
-checkout's config explicitly, for example:
+From inside the intended repository, omit `--repo`. The launcher resolves its
+workflow files relative to itself, checks for a clean target checkout, discovers
+the default branch, checks local and remote integration-branch collisions, and
+fetches the default branch from origin. It creates the integration worktree from
+that exact fetched commit using an explicit workmux `--base <sha>`.
+
+The source checkout stays on its current branch. No local default checkout,
+pull, merge, or reset is required. A local default branch may be behind origin;
+if it has ahead or divergent commits, stop and follow recovery guidance. The
+launcher does not need to create a missing local default branch.
+
+It also excludes `.workmux-local/` through the target repository's local Git
+exclude file, shared by its worktrees, without modifying tracked .gitignore.
+It refuses tracked local state or ignore rules that prevent the exclusion.
+The kickoff prompt remains in the source checkout's ignored prompt directory
+for recovery. Integration handoff state belongs in the new integration worktree.
+
+The integration agent verifies its worktree and branch, initializes the handoff,
+and asks for the feature goal and acceptance criteria before dispatching work.
+Both workmux and Codex must be installed; run in the intended tmux/workmux
+context. Use `--parent-session <name>` when explicit tmux window placement is
+needed. Session-mode configurations should use their own placement instead.
+
+## Repository configuration and services
+
+Configuration selection is explicit and retained in the handoff:
+
+An explicit `--profile <name>` instead selects `profiles/<name>.json` in the
+central workflow checkout and renders its workmux settings to an ignored config
+under the source checkout's `.workmux-local/configs/`. It cannot be combined with
+`--config`. Profile hooks provision missing ignored configuration only, using
+`WM_PROJECT_ROOT` and `WM_WORKTREE_PATH`; existing destination files are preserved.
+Keep the generated absolute config path in the handoff and all task briefs.
+Without `--profile`, configuration selection remains:
+
+1. `--config <path>` selects an alternate config, resolved relative to the caller.
+2. Otherwise use the target repository root's `.workmux.yaml` when present.
+3. Otherwise use this package's `workmux.yaml` (Codex agent and shell panes).
+
+The selected config must provide a Codex `<agent>` pane for prompt delivery.
+Repository configs retain their hooks and file-copy settings; inspect these
+before use. The fallback does not start services, copy environment files, or
+symlink dependencies. Global settings still merge according to workmux rules.
+An alternate config replaces project-config selection; do not assume it layers
+on top of the target repo config. Put centrally maintained repository profiles
+where desired and select them through `--config`.
+
+Pass the same absolute effective config to task creation and recovery commands.
+If a config lives in a source checkout, keep that path available throughout the
+assignment. Verify paths before resuming; don't silently change configuration.
+
+Read target-repository setup instructions to choose dependencies, environment
+files, build checks, and runtime startup. Provision ignored files deliberately;
+worktrees do not isolate ports, databases, credentials, or external services.
+The integration worktree owns shared runtime and combined validation. Task
+agents run suitable isolated checks and coordinate before using shared services.
+Do not copy local handoff state, print credentials, or commit environment files.
+
+For selected repository profiles, use `python3 <workflow-root>/repo-profile.py
+setup <profile> --worktree . --install` to explicitly install dependencies and
+provision missing local files. Only integration runs `check` and `start` against
+shared services. The Gary profile reuses existing Redis and launches the app
+without Compose; task worktrees must not start competing servers. Record the
+profile and startup command in the handoff and task briefs. Profiles are recipes,
+not secrets. See README.md for profile fields, existing-worktree adoption, and
+startup limitations. Use the repo's supported runtime version (Gary: Node 22.17.0).
+
+## Local handoff state
+
+Maintain `.workmux-local/integration.md` only in the integration worktree.
+Keep task prompts in `.workmux-local/prompts/` there, using absolute prompt paths
+for workmux. Task worktrees write their own completion reports, not integration
+handoff copies. Verify local state is ignored in each worktree before writing it.
+
+Create the handoff at initialization and update it after dispatch, review,
+merge, validation, and cleanup. Record current operational context:
+
+- Feature goal, acceptance criteria, repository origin URL and source checkout.
+- Absolute workflow root, workflow revision, effective config path, default/PR
+  target branch, initial base SHA, integration branch, worktree, and current SHA.
+- Actual integration handle or pane ID and project session for notifications.
+- Task handles, branches, worktree paths, dispatch bases, prompt/report paths,
+  notification targets, latest status, and any outstanding corrections.
+- Completion acknowledgments keyed by task handle plus commit SHA, reviewed and
+  merged commits, validation commands/results and tested SHA, cleanup state.
+- Shared runtime details, next actions, blockers, and publishing authorization.
+
+Keep it concise and secret-free. Never force-add it. A fresh agent reads the
+handoff and central workflow, verifies Git and live workmux state, and resumes
+existing tasks rather than launching duplicates. The handoff may be stale and
+does not expand authorization. If it belongs to another integration branch,
+preserve it and reconcile context before overwriting it. Point agents opened
+elsewhere to the actual integration worktree; handoffs do not travel with branches.
+
+## Interrupted setup and reopening
+
+Successful fetches and local exclusions remain applied if later setup fails.
+Inspect `git worktree list`, branch refs, and workmux status before retrying.
+Do not automatically remove partially created worktrees or reset branches.
+If the integration worktree exists, reopen it with the recorded config and
+retained kickoff prompt, using the actual workmux handle:
 
 ```sh
-workmux open feat-my-new-feature --config "$PWD/.workmux.yaml" \
-  -p 'Use $workmux-integration. Initialize the integration handoff and ask for the feature goal and acceptance criteria before starting work.'
+workmux open <integration-handle> --config <absolute-effective-config> \
+  -P <absolute-kickoff-prompt>
 ```
 
-Run that recovery command from the checkout containing the new `.workmux.yaml`.
-Ensure the config is committed before dispatching further task worktrees so they
-inherit it as well.
-
-### Local development configuration
-
-The project config uses native workmux `files.copy` for root `.env` and
-`.env.local`, Next.js files `apps/web/.env`, `.env.local`, `.env.development`,
-and `.env.development.local`, and the engine's `services/rts-engine/.env`.
-Absent optional files are skipped. Root `pnpm dev` loads root `.env` through
-dotenv; Next.js additionally loads its own environment files, and the Rust
-engine can load its own `.env`. Root `.env.local` is used by some test/reset
-commands, not by the root dev command. A working root `.env` must provide
-`SPAWN_CONFIG_PATH` and `CONTENT_PACK_PATH` as well as the intended game/Redis
-settings. The launcher does not synthesize credentials or start services.
-
-On creation, workmux reads project config and copies files from the checkout where `workmux add` is run,
-including when dispatching from an integration worktree. Before dispatch,
-ensure that checkout has the intended ignored configuration; a branch/base
-commit does not carry it. New copies are independent: later edits do not
-propagate. No environment files, dependencies, build outputs, or handoff state
-are committed. `files.symlink: []` also overrides global file symlinks: run
-`pnpm install` separately in the new checkout, then `pnpm dev` manually in its
-shell pane. The agent and shell pane layout is unchanged.
-
-Copies preserve path values verbatim. The example root `.env` uses absolute
-`CONTENT_PACK_PATH` and `SPAWN_CONFIG_PATH` values pointing into the original
-checkout; copying them continues to read that checkout's YAML. For independent
-integration content, edit these two values in the integration copy to absolute
-paths inside that integration checkout (`packages/content/entities.yaml` and
-`services/rts-engine/config/spawn.yaml`). For the current `pnpm dev` engine
-command, relative paths resolve from `services/rts-engine`, so the equivalents
-are `../../packages/content/entities.yaml` and `config/spawn.yaml`, not paths
-relative to root `.env`. Check any custom file-valued settings and overrides in
-the engine `.env` too. Referenced external files are not recursively copied.
-The YAML files above are tracked and already present in new worktrees; generated
-art candidates and build caches are not startup config. Retained content revisions
-are required saved-game data: `.workmux.yaml` independently copies the complete
-`packages/content/.revisions` directory, including manifests and `bundles/`.
-When `RESTORE_GAMESTATE_ON_RESTART=true`, the engine loads the exact revision
-referenced by the Redis snapshot from `.revisions` beside `CONTENT_PACK_PATH`;
-the web app uses the integration checkout's `packages/content/.revisions`.
-A manifest alone is insufficient: its immutable asset bundles are verified too.
-Keep engine content paths inside the integration checkout so engine and web use
-its independent retained data. If the previous engine used an external content
-path, recover `.revisions` from beside that actual content file instead.
-An absent source directory is skipped by workmux, but saved-game restoration
-will fail if its required revision is missing. Do not disable restoration or
-reset Redis to work around missing local data.
-
-For an existing integration checkout missing configuration, merge this fix there
-and back up any existing environment files and retained revisions privately.
-With workmux 0.1.282, `sync-files` reads **both project config and source files
-from the primary checkout**, even when invoked inside the integration checkout.
-If primary still has the old `.workmux.yaml`, it can report success while copying
-nothing. It has no `--config` override. By contrast, `add` uses the dispatching
-checkout's config and source files (or its explicit `--config` override).
-The smoke test covers this difference with an old primary config and updated
-integration config. Do not change primary just to recover this worktree.
-
-Instead, from the integration checkout, explicitly copy from a known configured
-checkout (replace the example absolute source path). This overwrites matching
-local files, so back them up first. It does not change the source checkout:
-
-```sh
-source_root=/absolute/path/to/configured-checkout
-for file in .env .env.local apps/web/.env apps/web/.env.local apps/web/.env.development apps/web/.env.development.local services/rts-engine/.env; do
-  if [ -f "$source_root/$file" ]; then
-    mkdir -p "$(dirname "$file")"
-    cp -p "$source_root/$file" "$file"
-  fi
-done
-if [ -d "$source_root/packages/content/.revisions" ]; then
-  mkdir -p packages/content/.revisions
-  cp -Rp "$source_root/packages/content/.revisions/." packages/content/.revisions/
-fi
-```
-
-Coordinate with the integration owner to copy retained data while the previous
-engine/editor is stopped and no new revisions are being published. Copy the
-complete retained directory, preserving manifests and bundles; do not regenerate
-it from current YAML as a substitute for the saved revision. If any required
-revision or asset is unavailable in that source, recover it from the actual
-previous content directory or backup before starting. Keep restoration enabled
-when preserving the saved game. Nothing here resets or rewrites Redis.
-
-Once primary itself eventually contains the updated config, `workmux sync-files`
-from the integration checkout can reapply the primary's copies, overwriting
-existing local copies. Do not use `--all`. For this recovery, use the explicit
-copy above. Adjust the two YAML paths as described above, then run `pnpm install`
-and `pnpm dev` in the integration shell pane. Do not print credentials or
-force-add ignored files. `workmux open` alone does not repair missing data.
-
-Copied Redis URLs, game IDs, ports, and external credentials still address
-shared services. Worktrees do not isolate them. The integration worktree owns
-the single running app/engine and coordinates Redis ownership; stop any old
-app/engine before starting its replacement. Task worktrees must not start
-shared services or run reset commands against shared Redis. In particular,
-`RESTORE_GAMESTATE_ON_RESTART=false` can initialize a fresh world at startup.
-
-The disposable provisioning check uses installed workmux with headless creation,
-no hooks, isolated global config, and synthetic settings (no agents/services):
-
-```sh
-python3 scripts/tests/workmux-provisioning.py
-```
-
-It verifies copies, optional missing files, dispatch from a second worktree,
-stale-primary recovery, independent retained manifests/bundles, and exclusion of
-dependency/build/handoff directories.
-
-The launcher is the standard setup path described above. Before dispatching, verify `git branch --show-current` is the intended feature branch in the integration worktree. Relevant changes must be committed there before child worktrees are created.
+Reopening does not guarantee dependency or ignored-file provisioning. Inspect
+what exists and use the repository's setup instructions for recovery. Task
+worktrees must start from committed integration changes, not uncommitted files.
 
 ## Delegate through the integration agent
 
@@ -210,12 +184,12 @@ This request authorizes the integration agent to create the task branch and work
 
 1. **Prepare a committed starting point.** Identify the branch checked out in the integration worktree and use it explicitly as the integration branch. Commit completed, relevant integration-agent edits before dispatching. Do not automatically commit unrelated user edits; clarify their handling when they affect the task. Uncommitted changes are not included in new task branches.
 
-2. **Write a self-contained task brief.** Include the problem, expected behavior, relevant files and context, scope boundaries, acceptance criteria, and required local checks. Tell the task agent to commit its finished work, save the completion report described below, and notify the integration agent. Include the exact integration handle (or unambiguous pane ID), project session, task handle, and absolute task-local report path in every brief. Do not infer the notification target from a branch name. The integration agent owns merging and shared-service testing. Store the prompt outside tracked source, or in an ignored location, so it does not become an accidental product change.
+2. **Write a self-contained task brief.** Include the problem, expected behavior, relevant files and context, scope boundaries, acceptance criteria, and required local checks. Tell the task agent to commit its finished work, save the completion report described below, and notify the integration agent. Identify the role as TASK AGENT. Include absolute paths to the central AGENTS.md, skill, and workflow; the target repository and its applicable instructions; the recorded default branch; and the effective config path. Tell the task agent to implement directly without dispatching other agents. Include the exact integration handle (or unambiguous pane ID), project session, task handle, and absolute task-local report path in every brief. Do not infer the notification target from a branch name. The integration agent owns merging and shared-service testing. Store the prompt outside tracked source, or in an ignored location, so it does not become an accidental product change.
 
-3. **Dispatch the task.** Choose a unique task branch and create its worktree from the committed integration branch. Pass the prompt file to the new agent:
+3. **Dispatch the task.** Run workmux from the target integration worktree. Choose a unique task branch and create its worktree from the committed integration branch. Pass the prompt file to the new agent:
 
    ```sh
-   workmux add <task-branch> --base <integration-branch> -b -P <prompt-file> --parent-session <project-session>
+   workmux add <task-branch> --base <integration-branch> --config <absolute-effective-config> -b -P <prompt-file> --parent-session <project-session>
    ```
 
    For example, use `feat/my-new-feature-dashboard` as the task branch and `feat/my-new-feature` as its base. Independent tasks may run concurrently. Each branch starts from the integration branch's committed state at dispatch time; existing task branches do not automatically receive later integration changes. For dependent tasks, dispatch after the prerequisite is merged, or explicitly coordinate an update of the task branch.
@@ -230,7 +204,7 @@ This request authorizes the integration agent to create the task branch and work
    workmux merge <handle> --into <integration-branch> --keep
    ```
 
-   Do not rely on the default merge target: it may be `main`. Resolve overlapping edits deliberately and review the combined result. `--keep` retains the task worktree, branch, and tmux window for follow-up work.
+   Do not rely on the default merge target: it may be the repository default branch. Resolve overlapping edits deliberately and review the combined result. `--keep` retains the task worktree, branch, and tmux window for follow-up work.
 
 5. **Validate in the integration worktree.** Run appropriate checks against the combined changes. Reload or restart the single running app/server as needed and run integration or E2E checks here. Worktrees do not isolate databases, ports, or external services.
 
@@ -327,44 +301,40 @@ to be actively polling.
 
 ## Publish the combined feature
 
-When requested, publish the validated integration branch and open one PR targeting `main`:
+Push and create a PR only when requested. Use the default branch and repository
+identity recorded and verified for this integration, with explicit destinations:
 
 ```sh
-git push -u origin feat/my-new-feature
-gh pr create --base main --head feat/my-new-feature
+git push -u origin <integration-branch>
+gh pr create --repo <origin-repository-url> \
+  --base <recorded-default-branch> --head <integration-branch>
 ```
 
-After the PR is merged on GitHub, synchronize local `main`:
+Before publication, verify that origin still identifies the intended repository
+and the GitHub default still matches the recorded target using the shared helper.
+If it changed, reconcile the assignment before retargeting or publishing.
 
-```sh
-git switch main
-git pull --ff-only
-```
+After GitHub merges the PR, fetch origin's default branch. When synchronizing a
+local default branch, use its owning worktree with a clean checkout and explicit
+`git merge --ff-only refs/remotes/origin/<default-branch>`. If it is not checked
+out anywhere, switch to it only in a suitable clean checkout. Never switch away
+from active integration work merely to synchronize a default branch.
 
-A squash merge creates new commit identities on GitHub. That is expected: because local `main` never received feature commits, it should fast-forward to `origin/main` cleanly. Verify `git status -sb` says `main` is up to date before starting the next integration branch. If `git pull --ff-only` fails or status shows local `main` ahead/diverged, stop. Do not merge or reset to make the warning disappear; use the recovery procedure below.
+A squash merge creates new commit identities. Because the local default branch
+never received feature commits, synchronization should fast-forward cleanly.
+A failed fast-forward or ahead/diverged local branch calls for recovery.
 
-## Recover local `main` if it already contains feature commits
+## Recover a local default branch with ahead or divergent commits
 
-Do not pull, merge, rebase, or reset blindly. First inspect `git status -sb`,
-`git worktree list`, `git log --graph --decorate --oneline --all`, and
-`git log --oneline origin/main..main`. Identify whether the local commits are
-needed, whether another worktree or branch depends on them, and whether their
-file changes are already present on `origin/main` (compare `git diff main
-origin/main`).
+Do not pull, merge, rebase, or reset blindly. Inspect `git status -sb`,
+`git worktree list`, the all-branch commit graph, and the commits in
+`refs/remotes/origin/<default-branch>..<default-branch>`. Determine whether
+those commits contain ongoing work, whether other worktrees depend on them,
+and whether the remote already includes their file changes.
 
-If all local changes are present on `origin/main` and the commits are only
-duplicate commit identities from a prior merge or squash, preserve a backup
-reference before aligning local `main`:
-
-```sh
-git branch backup/main-before-sync main
-git switch main
-git reset --hard origin/main
-```
-
-Only do this when the working tree is clean and after verifying the feature
-worktree/branch that contains any ongoing work remains intact. If local commits
-contain changes absent from `origin/main`, preserve them on a separate branch or
-worktree and integrate deliberately; do not discard them. The goal is for local
-`main` to track `origin/main`, while active feature work remains on its
-integration branch.
+Preserve needed work on a separate branch or worktree. If local commits merely
+duplicate already-published changes, preserve a backup reference before any
+alignment. Only realign after verifying clean state, the intended remote,
+and that all needed changes and active feature work remain recoverable. Never
+use an automatic hard reset as launcher recovery. Re-run setup after resolving
+the local divergence; ongoing integrations resume from their handoff instead.
